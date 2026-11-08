@@ -75,6 +75,7 @@ a{color:var(--acc);font-weight:800}
 .dd{width:auto;max-width:100%}.dd .im{width:auto;max-width:100%;max-height:36svh;aspect-ratio:auto;object-fit:contain}
 .nav{position:relative}.dmb{border:0;background:none;font-weight:800;font-size:1rem;padding:6px 10px}
 .dlp{position:absolute;top:100%;left:0;right:0;max-height:55vh;overflow:auto;z-index:8;background:var(--card);border:2px solid var(--ink);border-radius:14px;padding:8px;display:grid;gap:6px}
+.rt{display:flex;gap:8px;margin-bottom:10px}.rt button{flex:1}.rt .act{color:#1b1b2f}.lg{font-size:.92rem}
 </style>
 </head>
 <body>
@@ -202,30 +203,39 @@ async function gallery(it,list,tok){
   if(sc.length) ranking();
 }
 
+let rtab="w",RK={};
+function showRank(){
+  const el=$("#rank"); if(!el||!RK.w) return;
+  el.innerHTML=`<div class="rt"><button data-rt="w" class="${rtab==="w"?"act":""}">Tabla semanal</button><button data-rt="t" class="${rtab==="t"?"act":""}">Tabla total</button></div>${RK[rtab]}`;
+  el.onclick=e=>{const b=e.target.closest("[data-rt]"); if(b){rtab=b.dataset.rt; showRank()}};
+}
 async function ranking(){
   try{
     const r=await (await fetch(`${SUPABASE_URL}/rest/v1/scores?room=eq.${encodeURIComponent(ls("room"))}&select=name,day,nota`,{headers:H})).json();
-    const el=$("#rank"); if(!el||!Array.isArray(r)) return;
+    if(!Array.isArray(r)) return;
     const td=dayKey(today()), num=d=>Math.round(Date.parse(d)/864e5), wk=d=>dayKey(num(d)-((new Date(num(d)*864e5).getUTCDay()+6)%7)); // semanas de lunes a domingo
-    const cw=wk(td), byDay={}, W={}, get=(w,n)=>((W[w]??={})[n]??={p:0,s:0,c:0,b:0}), avg=o=>Math.round(o.s/o.c*100)/100;
+    const cw=wk(td), byDay={}, W={}, T={}, hist=[], get=(w,n)=>((W[w]??={})[n]??={p:0,w:0,s:0,c:0,b:0}), avg=o=>Math.round(o.s/o.c*100)/100;
     r.forEach(x=>{const v=Number(x.nota),o=get(wk(x.day),x.name);o.s+=v;o.c++;o.b=Math.max(o.b,v);(byDay[x.day]??=[]).push({n:x.name,v})});
     Object.entries(byDay).forEach(([day,arr])=>{ // puntos por posición cada día (el de hoy cuenta cuando hayáis terminado todos)
       if(day>=td&&arr.length<PLAYERS) return; arr.sort((a,b)=>b.v-a.v); let i=0;
-      while(i<arr.length){let j=i;while(j+1<arr.length&&arr[j+1].v===arr[i].v)j++;let sum=0;for(let k=i;k<=j;k++)sum+=Math.max(0,PLAYERS-k);const n=j-i+1;for(let k=i;k<=j;k++)get(wk(day),arr[k].n).p+=sum/n;i=j+1}});
-    const total={},hist=[];
-    Object.keys(W).sort().forEach(w=>{ const rows=Object.entries(W[w]); rows.forEach(([n,o])=>{(total[n]??={w:0,p:0}).p+=o.p});
+      while(i<arr.length){let j=i;while(j+1<arr.length&&arr[j+1].v===arr[i].v)j++;let sum=0;for(let k=i;k<=j;k++)sum+=Math.max(0,PLAYERS-k);const n=j-i+1;
+        for(let k=i;k<=j;k++){const o=get(wk(day),arr[k].n);o.p+=sum/n;if(i===0)o.w+=1/n}i=j+1}});
+    Object.keys(W).sort().forEach(w=>{ const rows=Object.entries(W[w]);
+      rows.forEach(([n,o])=>{const t=T[n]??={p:0,w:0,s:0,c:0,b:0,wins:0};t.p+=o.p;t.w+=o.w;t.s+=o.s;t.c+=o.c;t.b=Math.max(t.b,o.b)});
       if(w>=cw) return; const best=Math.max(...rows.map(([,o])=>o.p)); if(best<=0) return; // semana cerrada: gana quien más puntos tenga; empate: mejor media
       const top=rows.filter(([,o])=>o.p===best), bm=Math.max(...top.map(([,o])=>avg(o))), win=top.filter(([,o])=>avg(o)===bm);
-      win.forEach(([n])=>total[n].w++); hist.push({w,win:win.map(([n])=>n),p:best})});
+      win.forEach(([n])=>T[n].wins++); hist.push({w,win:win.map(([n])=>n),p:best})});
     const f=n=>String(+n.toFixed(1)).replace(".",","), fd=d=>new Date(num(d)*864e5).toLocaleDateString("es-ES",{day:"numeric",month:"short",timeZone:"UTC"});
     const cur=Object.entries(W[cw]??{}).sort((a,b)=>b[1].p-a[1].p||avg(b[1])-avg(a[1])), left=num(cw)+6-today();
-    const vic=Object.entries(total).sort((a,b)=>b[1].w-a[1].w||b[1].p-a[1].p);
-    el.innerHTML=`<div class="card"><b>Esta semana</b> <span class="mut">(${fd(cw)} – ${fd(dayKey(num(cw)+6))})</span>
-    ${cur.length?`<table class="lg"><tr><th></th><th>Jugador</th><th>Pts</th><th>Media</th></tr>${cur.map(([n,o],i)=>`<tr><td>${i+1}</td><td>${esc(n)}</td><td><b>${f(o.p)}</b></td><td>${f(avg(o))}</td></tr>`).join("")}</table>`:`<p class="mut">Aún no hay puntuaciones esta semana.</p>`}
-    <p class="mut" style="font-size:.85rem;text-align:left">${left>0?`Se cierra el domingo (quedan ${left} día${left===1?"":"s"} después de hoy).`:"Hoy es el último día: se cierra al acabar el día."} Pts: ${PLAYERS} al 1º cada día, uno menos por puesto, 0 si no dibujas. El día de hoy cuenta cuando hayáis terminado todos.</p></div>
-    <div class="card"><b>Victorias semanales 🏆</b>
-    ${vic.length?`<table class="lg"><tr><th></th><th>Jugador</th><th>🏆</th><th>Pts totales</th></tr>${vic.map(([n,o],i)=>`<tr><td>${i+1}</td><td>${esc(n)}</td><td><b>${o.w}</b></td><td>${f(o.p)}</td></tr>`).join("")}</table>`:`<p class="mut">Aún no hay datos.</p>`}
-    ${hist.length?`<p class="mut" style="text-align:left;margin-bottom:2px">Semanas cerradas:</p>${hist.slice().reverse().map(h=>`<div>Semana del ${fd(h.w)}: <b>${h.win.map(esc).join(" y ")}</b> · ${f(h.p)} pts</div>`).join("")}`:`<p class="mut" style="font-size:.85rem;text-align:left">Cuando acabe la primera semana saldrá aquí el ganador. Si hay empate a puntos, gana la mejor media; si siguen empatados, ganan los dos.</p>`}</div>`;
+    const tot=Object.entries(T).sort((a,b)=>b[1].wins-a[1].wins||b[1].p-a[1].p||avg(b[1])-avg(a[1]));
+    RK.w=`<div class="card"><b>Esta semana</b> <span class="mut">(${fd(cw)} – ${fd(dayKey(num(cw)+6))})</span>
+    ${cur.length?`<table class="lg"><tr><th></th><th>Jugador</th><th>Pts</th><th>Vic</th><th>Media</th><th>Mejor</th></tr>${cur.map(([n,o],i)=>`<tr><td>${i+1}</td><td>${esc(n)}</td><td><b>${f(o.p)}</b></td><td>${f(o.w)}</td><td>${f(avg(o))}</td><td>${f(o.b)}</td></tr>`).join("")}</table>`:`<p class="mut">Aún no hay puntuaciones esta semana.</p>`}
+    <p class="mut" style="font-size:.85rem;text-align:left">${left>0?`Se cierra el domingo (quedan ${left} día${left===1?"":"s"} después de hoy).`:"Hoy es el último día: se cierra al acabar el día."} Pts: ${PLAYERS} al 1º cada día, uno menos por puesto, 0 si no dibujas. Vic: días ganados. El día de hoy cuenta cuando hayáis terminado todos.</p></div>`;
+    RK.t=`<div class="card"><b>Total</b> <span class="mut">(desde el principio)</span>
+    ${tot.length?`<table class="lg"><tr><th></th><th>Jugador</th><th>🏆</th><th>Pts</th><th>Vic</th><th>Media</th><th>Mejor</th></tr>${tot.map(([n,o],i)=>`<tr><td>${i+1}</td><td>${esc(n)}</td><td><b>${o.wins}</b></td><td>${f(o.p)}</td><td>${f(o.w)}</td><td>${f(avg(o))}</td><td>${f(o.b)}</td></tr>`).join("")}</table>`:`<p class="mut">Aún no hay datos.</p>`}
+    <p class="mut" style="font-size:.85rem;text-align:left">🏆: semanas ganadas (se ordena por esto y, si hay empate, por puntos). Pts: puntos por posición de todos los días. Vic: días ganados.</p>
+    ${hist.length?`<p class="mut" style="text-align:left;margin-bottom:2px">Semanas cerradas:</p>${hist.slice().reverse().map(h=>`<div>Semana del ${fd(h.w)}: <b>${h.win.map(esc).join(" y ")}</b> · ${f(h.p)} pts</div>`).join("")}<p class="mut" style="font-size:.85rem;text-align:left">Gana la semana quien más puntos tenga; si hay empate, la mejor media; si siguen empatados, ganan los dos.</p>`:`<p class="mut" style="font-size:.85rem;text-align:left">Cuando acabe la primera semana saldrá aquí su ganador.</p>`}</div>`;
+    showRank();
   }catch(e){}
 }
 
