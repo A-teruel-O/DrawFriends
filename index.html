@@ -6,6 +6,7 @@
 <title>Dibuja de memoria</title>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@500;800&display=swap" rel="stylesheet">
 <style>
+html,body{overscroll-behavior:none}
 :root{--bg:#eef2ff;--ink:#1b1b2f;--card:#fff;--acc:#ff4d6d;--sun:#ffd23f;--mut:#6b6f8a}
 @media(prefers-color-scheme:dark){:root{--bg:#14152a;--ink:#f1f2ff;--card:#1f2040;--mut:#9a9dc0}}
 *{box-sizing:border-box}
@@ -72,14 +73,16 @@ a{color:var(--acc);font-weight:800}
 .fh{position:static}.fh b,.fh .t{background:none;padding:0;color:var(--ink)}.fh .t{color:var(--acc)}
 .fb{position:static;display:flex;flex-direction:column;gap:6px}.fb .tools{justify-content:center}.fb .p{padding:8px}
 .dd{width:auto;max-width:100%}.dd .im{width:auto;max-width:100%;max-height:36svh;aspect-ratio:auto;object-fit:contain}
+.nav{position:relative}.dmb{border:0;background:none;font-weight:800;font-size:1rem;padding:6px 10px}
+.dlp{position:absolute;top:100%;left:0;right:0;max-height:55vh;overflow:auto;z-index:8;background:var(--card);border:2px solid var(--ink);border-radius:14px;padding:8px;display:grid;gap:6px}
 </style>
 </head>
 <body>
 <main id="app"></main>
 <script>
 /* ====== CONFIGURACIÓN (pega aquí tus datos de Supabase) ====== */
-const SUPABASE_URL = "https://bqyjiazhnickpnzmtzlm.supabase.co";      // https://xxxx.supabase.co
-const SUPABASE_KEY = "sb_publishable_6NK5hhXDrdUlIl6SKoL1JQ_3ZkxFw4Q"; // clave "anon public"
+const SUPABASE_URL = "PEGA_AQUI_TU_URL";      // https://xxxx.supabase.co
+const SUPABASE_KEY = "PEGA_AQUI_TU_ANON_KEY"; // clave "anon public"
 const PLAYERS = 3;      // cuántos sois
 const SECONDS = 120;    // tiempo para dibujar
 /* ============================================================== */
@@ -103,12 +106,12 @@ function itemFor(n,room){ const P=shufCache[room]??=shuffled(POKE.map((x,i)=>({n
 async function getDrawings(day){
   const r = await fetch(`${SUPABASE_URL}/rest/v1/drawings?room=eq.${encodeURIComponent(ls("room"))}&day=eq.${dayKey(day)}&select=name,img&order=created_at`, {headers:H});
   if(!r.ok) throw new Error("No se pudo leer"); return r.json(); }
-async function send(day, img){
+async function send(day, img, crop){
   const r = await fetch(`${SUPABASE_URL}/rest/v1/drawings`, {method:"POST", headers:{...H,Prefer:"return=minimal"},
-    body:JSON.stringify({room:ls("room"), day:dayKey(day), name:ls("name"), img})});
+    body:JSON.stringify({room:ls("room"), day:dayKey(day), name:ls("name"), img, crop})});
   if(!r.ok && r.status!==409) throw new Error("No se pudo enviar"); }
 
-let view = today(), timer=null, poll=null;
+let view = today(), timer=null, poll=null, rid=0;
 const esc = s => s.replace(/[&<>"]/g, c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
 function setup(){
@@ -119,25 +122,31 @@ function setup(){
 }
 
 async function render(){
+  const my=++rid;
   clearInterval(timer); clearInterval(poll); clearInterval(cTimer); lastSig=""; cur=0; auto=true; document.body.style.overflow="";
   if(!ls("name")||!ls("room")) return setup();
-  const t=today(); let start=t;
+  const t=today(); if(view>t) view=t; let start=t;
   try{ const r=await (await fetch(`${SUPABASE_URL}/rest/v1/drawings?room=eq.${encodeURIComponent(ls("room"))}&select=day&order=day.asc&limit=1`,{headers:H})).json(); if(r[0]) start=Math.min(t,Math.round(Date.parse(r[0].day)/864e5)); }catch(e){}
-  if(view<start) view=start;
-  const it=itemFor(view-start,ls("room"));
-  app.innerHTML=`<div class="nav"><button id="b" ${view<=start?"disabled":""}>‹</button><b>${view===t?"Hoy · ":""}Día ${view-start+1}</b><button id="f" ${view>=t?"disabled":""}>›</button></div><div id="body"><p class="mut">Cargando…</p></div><div id="rank"></div>
+  if(my!==rid) return;
+  if(view<start) view=start; if(view>t) view=t;
+  const v=view, it=itemFor(v-start,ls("room"));
+  let days=""; for(let d=t;d>=start;d--) days+=`<button data-d="${d}" class="${d===v?"act":""}">Día ${d-start+1} · ${esc(itemFor(d-start,ls("room")).name)}</button>`;
+  app.innerHTML=`<div class="nav"><button id="b" ${v<=start?"disabled":""}>‹</button><button id="dm" class="dmb">${v===t?"Hoy · ":""}Día ${v-start+1} ▾</button><button id="f" ${v>=t?"disabled":""}>›</button><div id="dl" class="dlp" hidden>${days}</div></div><div id="body"><p class="mut">Cargando…</p></div><div id="rank"></div>
   <p class="mut">${esc(ls("name"))} · sala ${esc(ls("room"))} · <a href="#" id="out">cambiar</a></p>`;
-  $("#b").onclick=()=>{view--;render()}; $("#f").onclick=()=>{view++;render()}; $("#out").onclick=e=>{e.preventDefault();setup()};
-  let list; try{ list=await getDrawings(view);}catch(e){ $("#body").innerHTML=`<div class="card">No se pudo conectar. Revisa la configuración de Supabase.</div>`; return; }
+  $("#b").onclick=()=>{$("#b").disabled=$("#f").disabled=true;view=Math.max(start,v-1);render()}; $("#f").onclick=()=>{$("#b").disabled=$("#f").disabled=true;view=Math.min(t,v+1);render()};
+  $("#dm").onclick=()=>{$("#dl").hidden=!$("#dl").hidden};
+  $("#dl").onclick=e=>{const b=e.target.closest("button");if(!b)return;view=Math.min(t,Math.max(start,+b.dataset.d));render()}; $("#out").onclick=e=>{e.preventDefault();setup()};
+  let list; try{ list=await getDrawings(v);}catch(e){ if(my!==rid) return; $("#body").innerHTML=`<div class="card">No se pudo conectar. Revisa la configuración de Supabase.</div>`; return; }
+  if(my!==rid) return;
   const mine = list.some(d=>d.name===ls("name"));
-  const key="start:"+ls("room")+dayKey(view)+ls("name"), started=ls(key);
-  if(view===t && !mine){
+  const key="start:"+ls("room")+dayKey(v)+ls("name"), started=ls(key);
+  if(v===t && !mine){
     if(!started){
       $("#body").innerHTML=`<div class="card"><p class="cat">${it.cat}</p><div class="word">${esc(it.name)}</div><p class="mut">${SECONDS} segundos. Solo un intento al día, y de memoria.</p><button class="p" id="s" style="width:100%">Empezar</button></div>`;
-      $("#s").onclick=()=>{ls(key,Date.now());render()}; ranking(); return; }
+      $("#s").onclick=()=>{ls(key,Date.now());try{localStorage.removeItem("draft:"+key.slice(6))}catch(e){}render()}; ranking(); return; }
     return draw(it,key,+started);
   }
-  gallery(it,list); poll=setInterval(async()=>{try{gallery(it,await getDrawings(view))}catch(e){}},8000);
+  gallery(it,list,my); poll=setInterval(async()=>{try{const l=await getDrawings(v); if(my===rid) gallery(it,l,my)}catch(e){}},8000);
 }
 
 let judging=false,lastSig="",lastTry=0,jerr="",cur=0,auto=true,cTimer=null,G={list:[],sc:[],it:null},RX=[],popup=false;
@@ -158,16 +167,20 @@ function itemHTML(i){
 function slide(){const e=$("#sl"); if(!e||!G.list.length) return; const d=G.list[cur],s=G.sc.find(x=>x.name===d.name);
   e.innerHTML=itemHTML(cur); $("#ttl").textContent=(cur+1)+" / "+G.list.length;}
 function go(d){ if(!G.list.length) return; popup=false; cur=(cur+d+G.list.length)%G.list.length; slide(); }
-async function gallery(it,list){
-  const done=list.length>0; if(!$("#body")) return;
+async function gallery(it,list,tok){
+  if(!$("#body")||tok!==rid) return;
+  if(view>today()) return; // nunca se muestra nada del día siguiente
+  if(view===today() && !list.some(d=>d.name===ls("name"))){ $("#body").innerHTML=`<div class="card"><p class="mut">Dibuja primero para ver esto.</p></div>`; return; }
+  const done=list.length>0;
   let sc=[],rx=[];
   if(done){
     const q=`room=eq.${encodeURIComponent(ls("room"))}&day=eq.${dayKey(view)}`;
     try{ sc=await (await fetch(`${SUPABASE_URL}/rest/v1/scores?${q}&select=name,nota,motivo,comentario`,{headers:H})).json(); }catch(e){}
     try{ rx=await (await fetch(`${SUPABASE_URL}/rest/v1/reactions?${q}&select=to_name,emoji`,{headers:H})).json(); }catch(e){}
     if(!Array.isArray(sc)) sc=[]; if(!Array.isArray(rx)) rx=[];
+    if(tok!==rid) return;
     if(sc.length<list.length && !judging && Date.now()-lastTry>30000){ judging=true; lastTry=Date.now(); jerr="";
-      fetch(`${SUPABASE_URL}/functions/v1/judge`,{method:"POST",headers:H,body:JSON.stringify({room:ls("room"),day:dayKey(view),item:it.name})})
+      fetch(`${SUPABASE_URL}/functions/v1/judge`,{method:"POST",headers:H,body:JSON.stringify({room:ls("room"),day:dayKey(view),item:it.name,ref:it.img})})
         .then(r=>r.json()).then(j=>{if(!j.ok) jerr=j.error||j.reason||"error desconocido"})
         .catch(()=>{jerr="No se pudo llamar a la función judge (¿está creada y con Verify JWT desactivado?)"})
         .finally(()=>{judging=false;lastSig=""}); }
@@ -179,7 +192,6 @@ async function gallery(it,list){
   ${done?`<div class="gh"><button id="pv">‹</button><b id="ttl"></b><button id="nx">›</button></div><div id="sl" class="sl"></div>${list.length<PLAYERS&&view===today()?`<p class="mut">Han enviado ${list.length} de ${PLAYERS}. Los demás aparecerán en cuanto dibujen.</p>`:""}`
   :`<p class="mut">Nadie dibujó este día.</p>`}</div>`;
   if(done){ cur=Math.min(cur,list.length-1); const sl=$("#sl"); $("#pv").onclick=()=>go(-1); $("#nx").onclick=()=>go(1); slide();
-    let tx=0; sl.ontouchstart=e=>{tx=e.touches[0].clientX}; sl.ontouchend=e=>{const dx=e.changedTouches[0].clientX-tx; if(Math.abs(dx)>60&&G.list.length>1) go(dx<0?1:-1)};
     sl.onclick=async e=>{ const t=e.target.closest("button"); if(!t) return; const d=G.list[cur];
       if(t.dataset.dl!==undefined){ const a=document.createElement("a"); a.href=d.img; a.download=`${G.it.name}-${d.name}.jpg`.replace(/[^\w.-]+/g,"_"); a.click(); return; }
       if(t.dataset.plus!==undefined){ popup=!popup; slide(); return; }
@@ -194,21 +206,26 @@ async function ranking(){
   try{
     const r=await (await fetch(`${SUPABASE_URL}/rest/v1/scores?room=eq.${encodeURIComponent(ls("room"))}&select=name,day,nota`,{headers:H})).json();
     const el=$("#rank"); if(!el||!Array.isArray(r)) return;
-    const td=dayKey(today()),byDay={},T={},get=n=>T[n]??={p:0,w:0,s:0,c:0,b:0};
-    r.forEach(x=>{const v=Number(x.nota);(byDay[x.day]??=[]).push({n:x.name,v});const o=get(x.name);o.s+=v;o.c++;o.b=Math.max(o.b,v)});
-    Object.entries(byDay).forEach(([day,arr])=>{
-      if(day>=td&&arr.length<PLAYERS) return;
-      arr.sort((a,b)=>b.v-a.v); let i=0;
-      while(i<arr.length){let j=i; while(j+1<arr.length&&arr[j+1].v===arr[i].v) j++;
-        let sum=0; for(let k=i;k<=j;k++) sum+=Math.max(0,PLAYERS-k);
-        const n=j-i+1; for(let k=i;k<=j;k++){const o=get(arr[k].n);o.p+=sum/n;if(i===0)o.w+=1/n}
-        i=j+1;}
-    });
-    const f=n=>String(+n.toFixed(1)).replace(".",",");
-    const rows=Object.entries(T).sort((a,b)=>b[1].p-a[1].p||b[1].s/b[1].c-a[1].s/a[1].c);
-    el.innerHTML=`<div class="card"><b>Clasificación general</b>${rows.length?`<table class="lg"><tr><th></th><th>Jugador</th><th>Pts</th><th>Vic</th><th>Media</th><th>Mejor</th></tr>
-    ${rows.map(([n,o],i)=>`<tr><td>${i+1}</td><td>${esc(n)}</td><td><b>${f(o.p)}</b></td><td>${f(o.w)}</td><td>${f(o.s/o.c)}</td><td>${f(o.b)}</td></tr>`).join("")}</table>
-    <p class="mut" style="font-size:.85rem;text-align:left">Pts: puntos por posición cada día (${PLAYERS} al 1º, uno menos por puesto, 0 si no dibujas). Vic: días ganados. El día de hoy cuenta cuando hayáis terminado todos o al acabar el día.</p>`:`<p class="mut">Aún no hay puntuaciones.</p>`}</div>`;
+    const td=dayKey(today()), num=d=>Math.round(Date.parse(d)/864e5), wk=d=>dayKey(num(d)-((new Date(num(d)*864e5).getUTCDay()+6)%7)); // semanas de lunes a domingo
+    const cw=wk(td), byDay={}, W={}, get=(w,n)=>((W[w]??={})[n]??={p:0,s:0,c:0,b:0}), avg=o=>Math.round(o.s/o.c*100)/100;
+    r.forEach(x=>{const v=Number(x.nota),o=get(wk(x.day),x.name);o.s+=v;o.c++;o.b=Math.max(o.b,v);(byDay[x.day]??=[]).push({n:x.name,v})});
+    Object.entries(byDay).forEach(([day,arr])=>{ // puntos por posición cada día (el de hoy cuenta cuando hayáis terminado todos)
+      if(day>=td&&arr.length<PLAYERS) return; arr.sort((a,b)=>b.v-a.v); let i=0;
+      while(i<arr.length){let j=i;while(j+1<arr.length&&arr[j+1].v===arr[i].v)j++;let sum=0;for(let k=i;k<=j;k++)sum+=Math.max(0,PLAYERS-k);const n=j-i+1;for(let k=i;k<=j;k++)get(wk(day),arr[k].n).p+=sum/n;i=j+1}});
+    const total={},hist=[];
+    Object.keys(W).sort().forEach(w=>{ const rows=Object.entries(W[w]); rows.forEach(([n,o])=>{(total[n]??={w:0,p:0}).p+=o.p});
+      if(w>=cw) return; const best=Math.max(...rows.map(([,o])=>o.p)); if(best<=0) return; // semana cerrada: gana quien más puntos tenga; empate: mejor media
+      const top=rows.filter(([,o])=>o.p===best), bm=Math.max(...top.map(([,o])=>avg(o))), win=top.filter(([,o])=>avg(o)===bm);
+      win.forEach(([n])=>total[n].w++); hist.push({w,win:win.map(([n])=>n),p:best})});
+    const f=n=>String(+n.toFixed(1)).replace(".",","), fd=d=>new Date(num(d)*864e5).toLocaleDateString("es-ES",{day:"numeric",month:"short",timeZone:"UTC"});
+    const cur=Object.entries(W[cw]??{}).sort((a,b)=>b[1].p-a[1].p||avg(b[1])-avg(a[1])), left=num(cw)+6-today();
+    const vic=Object.entries(total).sort((a,b)=>b[1].w-a[1].w||b[1].p-a[1].p);
+    el.innerHTML=`<div class="card"><b>Esta semana</b> <span class="mut">(${fd(cw)} – ${fd(dayKey(num(cw)+6))})</span>
+    ${cur.length?`<table class="lg"><tr><th></th><th>Jugador</th><th>Pts</th><th>Media</th></tr>${cur.map(([n,o],i)=>`<tr><td>${i+1}</td><td>${esc(n)}</td><td><b>${f(o.p)}</b></td><td>${f(avg(o))}</td></tr>`).join("")}</table>`:`<p class="mut">Aún no hay puntuaciones esta semana.</p>`}
+    <p class="mut" style="font-size:.85rem;text-align:left">${left>0?`Se cierra el domingo (quedan ${left} día${left===1?"":"s"} después de hoy).`:"Hoy es el último día: se cierra al acabar el día."} Pts: ${PLAYERS} al 1º cada día, uno menos por puesto, 0 si no dibujas. El día de hoy cuenta cuando hayáis terminado todos.</p></div>
+    <div class="card"><b>Victorias semanales 🏆</b>
+    ${vic.length?`<table class="lg"><tr><th></th><th>Jugador</th><th>🏆</th><th>Pts totales</th></tr>${vic.map(([n,o],i)=>`<tr><td>${i+1}</td><td>${esc(n)}</td><td><b>${o.w}</b></td><td>${f(o.p)}</td></tr>`).join("")}</table>`:`<p class="mut">Aún no hay datos.</p>`}
+    ${hist.length?`<p class="mut" style="text-align:left;margin-bottom:2px">Semanas cerradas:</p>${hist.slice().reverse().map(h=>`<div>Semana del ${fd(h.w)}: <b>${h.win.map(esc).join(" y ")}</b> · ${f(h.p)} pts</div>`).join("")}`:`<p class="mut" style="font-size:.85rem;text-align:left">Cuando acabe la primera semana saldrá aquí el ganador. Si hay empate a puntos, gana la mejor media; si siguen empatados, ganan los dos.</p>`}</div>`;
   }catch(e){}
 }
 
@@ -223,19 +240,32 @@ function wheel(cv,v){const c=cv.getContext("2d"),n=cv.width,R=n/2,im=c.createIma
 
 function flood(x,sx,sy,hc,W,H){
   const im=x.getImageData(0,0,W,H),d=im.data;sx=Math.floor(sx);sy=Math.floor(sy);
-  const i0=(sy*W+sx)*4,tr=d[i0],tg=d[i0+1],tb=d[i0+2],c=[1,3,5].map(k=>parseInt(hc.slice(k,k+2),16));
+  const N=W*H,s0=sy*W+sx,i0=s0*4,tr=d[i0],tg=d[i0+1],tb=d[i0+2],c=[1,3,5].map(k=>parseInt(hc.slice(k,k+2),16));
   if(Math.abs(tr-c[0])+Math.abs(tg-c[1])+Math.abs(tb-c[2])<10) return;
-  const seen=new Uint8Array(W*H),st=[sy*W+sx];
-  while(st.length){const p=st.pop();if(seen[p])continue;const i=p*4;
-    if(Math.abs(d[i]-tr)+Math.abs(d[i+1]-tg)+Math.abs(d[i+2]-tb)>90)continue;
-    seen[p]=1;d[i]=c[0];d[i+1]=c[1];d[i+2]=c[2];d[i+3]=255;const px=p%W;
-    if(px>0)st.push(p-1);if(px<W-1)st.push(p+1);if(p>=W)st.push(p-W);if(p<W*H-W)st.push(p+W);}
+  const m=new Uint8Array(N); for(let p=0;p<N;p++){const i=p*4;m[p]=Math.abs(d[i]-tr)+Math.abs(d[i+1]-tg)+Math.abs(d[i+2]-tb)<=90?1:0}
+  // Se engordan las líneas R píxeles para cerrar huecos pequeños y que la pintura no se escape.
+  const R=4; let bl=new Uint8Array(N); for(let p=0;p<N;p++) bl[p]=m[p]?0:1;
+  for(let k=0;k<R;k++){const nb=bl.slice();for(let y=0;y<H;y++)for(let u=0;u<W;u++){const p=y*W+u;if(bl[p])continue;if((u>0&&bl[p-1])||(u<W-1&&bl[p+1])||(y>0&&bl[p-W])||(y<H-1&&bl[p+W]))nb[p]=1}bl=nb}
+  const seedOk=!bl[s0], A=new Uint8Array(N); for(let p=0;p<N;p++) A[p]=seedOk?(bl[p]?0:1):m[p]; // si pulsas pegado a una línea, relleno normal
+  const reg=new Uint8Array(N),st=[s0];
+  while(st.length){const p=st.pop();if(reg[p]||!A[p])continue;reg[p]=1;const u=p%W;if(u>0)st.push(p-1);if(u<W-1)st.push(p+1);if(p>=W)st.push(p-W);if(p<N-W)st.push(p+W)}
+  if(seedOk) for(let k=0;k<=R;k++){const add=[];for(let y=0;y<H;y++)for(let u=0;u<W;u++){const p=y*W+u;if(reg[p]||!m[p])continue;if((u>0&&reg[p-1])||(u<W-1&&reg[p+1])||(y>0&&reg[p-W])||(y<H-1&&reg[p+W]))add.push(p)}add.forEach(p=>reg[p]=1)}
+  for(let p=0;p<N;p++) if(reg[p]){const i=p*4;d[i]=c[0];d[i+1]=c[1];d[i+2]=c[2];d[i+3]=255}
   x.putImageData(im,0,0)}
+
+// Recorte del dibujo (mismo tamaño para todos) que ve la IA, para que el tamaño no influya en la nota.
+function cropOf(cv,x,W,H){
+  const d=x.getImageData(0,0,W,H).data;let x0=W,y0=H,x1=-1,y1=-1;
+  for(let y=0;y<H;y++)for(let u=0;u<W;u++){const p=(y*W+u)*4;if(d[p]<250||d[p+1]<250||d[p+2]<250){if(u<x0)x0=u;if(u>x1)x1=u;if(y<y0)y0=y;if(y>y1)y1=y}}
+  if(x1<0) return null;
+  const mg=Math.round(Math.max(x1-x0,y1-y0)*0.06)+6;x0=Math.max(0,x0-mg);y0=Math.max(0,y0-mg);x1=Math.min(W-1,x1+mg);y1=Math.min(H-1,y1+mg);
+  const w=x1-x0+1,h=y1-y0+1,sc=512/Math.max(w,h),o=document.createElement("canvas");o.width=Math.round(w*sc);o.height=Math.round(h*sc);
+  const c=o.getContext("2d");c.fillStyle="#fff";c.fillRect(0,0,o.width,o.height);c.drawImage(cv,x0,y0,w,h,0,0,o.width,o.height);return o.toDataURL("image/jpeg",0.7);}
 
 function draw(it,key,start){
   $("#body").innerHTML=`<div class="fs"><div class="fh"><b>${esc(it.name)}</b><span class="t" id="tm"></span></div><div class="cw" id="cw"><canvas id="c"></canvas></div><div class="fb"><div class="tools tw"><button id="cb" class="sw" style="background:#000000" title="Colores"></button>
    <button class="sz" data-s="4"><i style="width:5px;height:5px"></i></button><button class="sz act" data-s="10"><i style="width:10px;height:10px"></i></button><button class="sz" data-s="24"><i style="width:20px;height:20px"></i></button>
-   <button id="fl" title="Cubo" aria-label="Cubo">🪣</button><button id="er">Goma</button><button id="u" title="Deshacer" aria-label="Deshacer">↩</button><button id="cl" title="Borrar todo" aria-label="Borrar todo">🗑️</button>
+   <button id="fl" title="Cubo" aria-label="Cubo">🪣</button><button id="er" title="Goma" aria-label="Goma">🧽</button><button id="u" title="Deshacer" aria-label="Deshacer">↩</button><button id="rd" title="Rehacer" aria-label="Rehacer">↪</button><button id="cl" title="Borrar todo" aria-label="Borrar todo">🗑️</button>
   <div id="pn" class="panel" hidden><div class="tabs"><button data-t="p" class="on">Paleta</button><button data-t="w">Círculo</button></div>
    <div id="pp" class="pal"></div><div id="pw" hidden><canvas id="wc" width="180" height="180"></canvas><input type="range" id="bv" min="10" max="100" value="100" aria-label="Brillo"></div></div></div>
   <button class="p" id="ok" style="width:100%">Enviar ya</button></div></div>`;
@@ -243,7 +273,7 @@ function draw(it,key,start){
   const bb=cw.getBoundingClientRect(); let cw2=Math.max(50,bb.width-4),ch2=Math.max(50,bb.height-4),ratio=Math.min(1.2,ch2/cw2);
   if(ratio<1){cw2=Math.min(cw2,ch2);ratio=1}
   const W=600,H=Math.round(600*ratio); cv.width=W; cv.height=H; cv.style.width=cw2+"px"; cv.style.height=Math.round(cw2*ratio)+"px"; const x=cv.getContext("2d"); x.fillStyle="#fff"; x.fillRect(0,0,W,H); x.lineCap=x.lineJoin="round";
-  let col="#000000",w=10,erase=false,fill=false,on=false,hist=[],lx=0,ly=0,H0=0,S0=1,V0=1,picked=false;
+  let col="#000000",w=10,erase=false,fill=false,on=false,hist=[],redo=[],lx=0,ly=0,H0=0,S0=1,V0=1,picked=false;
   const setCol=c=>{col=c;erase=false;$("#cb").style.background=c;$("#er").classList.remove("act")};
   $("#pp").innerHTML=PAL.map(c=>`<button class="sw" data-c="${c}" style="background:${c}" aria-label="${c}"></button>`).join("");
   $("#pp").onclick=e=>{const b=e.target.closest("button"); if(b){setCol(b.dataset.c);$("#pn").hidden=true}};
@@ -257,20 +287,30 @@ function draw(it,key,start){
   document.querySelectorAll(".sz").forEach(b=>b.onclick=()=>{w=+b.dataset.s;document.querySelectorAll(".sz").forEach(t=>t.classList.toggle("act",t===b))});
   $("#er").onclick=()=>{erase=!erase;fill=false;$("#er").classList.toggle("act",erase);$("#fl").classList.remove("act")};
   $("#fl").onclick=()=>{fill=!fill;erase=false;$("#fl").classList.toggle("act",fill);$("#er").classList.remove("act")};
-  $("#u").onclick=()=>{if(hist.length) x.putImageData(hist.pop(),0,0)};
-  $("#cl").onclick=()=>{hist.push(x.getImageData(0,0,W,H));if(hist.length>10)hist.shift();x.fillStyle="#fff";x.fillRect(0,0,W,H);$("#pn").hidden=true};
+  $("#u").onclick=()=>{if(hist.length){redo.push(x.getImageData(0,0,W,H));x.putImageData(hist.pop(),0,0);save()}};
+  $("#rd").onclick=()=>{if(redo.length){hist.push(x.getImageData(0,0,W,H));x.putImageData(redo.pop(),0,0);save()}};
+  $("#cl").onclick=()=>{if(!confirm("¿Borrar todo el dibujo?"))return;redo.length=0;hist.push(x.getImageData(0,0,W,H));if(hist.length>10)hist.shift();x.fillStyle="#fff";x.fillRect(0,0,W,H);$("#pn").hidden=true;save()};
   const pos=e=>{const r=cv.getBoundingClientRect();return[(e.clientX-r.left)*W/r.width,(e.clientY-r.top)*H/r.height]};
-  cv.onpointerdown=e=>{cv.setPointerCapture(e.pointerId);$("#pn").hidden=true;hist.push(x.getImageData(0,0,W,H));if(hist.length>10)hist.shift();if(fill){const[a,b]=pos(e);flood(x,a,b,col,W,H);return;}on=true;
+  cv.onpointerdown=e=>{cv.setPointerCapture(e.pointerId);$("#pn").hidden=true;hist.push(x.getImageData(0,0,W,H));if(hist.length>10)hist.shift();redo.length=0;if(fill){const[a,b]=pos(e);flood(x,a,b,col,W,H);return;}on=true;
     x.strokeStyle=erase?"#fff":col;x.lineWidth=erase?w*1.6:w;[lx,ly]=pos(e);x.beginPath();x.moveTo(lx,ly);x.lineTo(lx+.1,ly);x.stroke();};
   cv.onpointermove=e=>{if(!on)return;const[a,b]=pos(e),mx=(lx+a)/2,my=(ly+b)/2;x.quadraticCurveTo(lx,ly,mx,my);x.stroke();x.beginPath();x.moveTo(mx,my);lx=a;ly=b;};
-  cv.onpointerup=cv.onpointercancel=()=>{on=false};
+  cv.onpointerup=cv.onpointercancel=()=>{on=false;save()};
+  // Borrador: el dibujo se guarda en el móvil según dibujas, así que si la página se recarga no se pierde.
+  const dk="draft:"+key.slice(6), save=()=>{try{ls(dk,cv.toDataURL("image/jpeg",0.6))}catch(e){}};
+  let ready=Promise.resolve(); const dr=ls(dk);
+  if(dr) ready=new Promise(res=>{const im=new Image(); im.onload=()=>{x.drawImage(im,0,0,W,H);res()}; im.onerror=res; im.src=dr});
   const blankNow=()=>{const d=x.getImageData(0,0,W,H).data;for(let i=0;i<d.length;i+=4)if(d[i]<255||d[i+1]<255||d[i+2]<255)return false;return true};
   let sent=false;
-  const fin=async()=>{ if(sent) return; sent=true; clearInterval(timer);
-    try{ await send(view, blankNow()?cv.toDataURL("image/png"):cv.toDataURL("image/jpeg",0.6)); render(); }
+  const fin=async()=>{ if(sent) return; sent=true; clearInterval(timer); await ready; $("#tm").textContent="Enviando…";
+    try{ await send(view, blankNow()?cv.toDataURL("image/png"):cv.toDataURL("image/jpeg",0.6), blankNow()?null:cropOf(cv,x,W,H)); try{localStorage.removeItem(dk)}catch(e){} render(); }
     catch(e){ sent=false; $("#tm").textContent="Error al enviar, reintentando…"; setTimeout(fin,2000);} };
-  $("#ok").onclick=fin;
-  const tick=()=>{const left=Math.max(0,SECONDS-Math.floor((Date.now()-start)/1000)); $("#tm").textContent=left+" s"; if(left===0) fin();};
+  // Al acabar el tiempo con el lienzo vacío no se gasta el intento: se ofrece empezar de nuevo.
+  const timeUp=async()=>{ if(sent) return; clearInterval(timer); await ready;
+    if(blankNow()&&confirm("Se acabó el tiempo y el lienzo está vacío. ¿Empezar de nuevo con otros "+SECONDS+" segundos?\n\nAceptar = empezar de nuevo · Cancelar = enviarlo en blanco")){
+      ls(key,Date.now()); try{localStorage.removeItem(dk)}catch(e){} render(); return; }
+    fin(); };
+  $("#ok").onclick=()=>{ if(confirm("¿Enviar el dibujo? Solo hay un intento al día y no se podrá cambiar.")) fin(); };
+  const tick=()=>{const left=Math.max(0,SECONDS-Math.floor((Date.now()-start)/1000)); $("#tm").textContent=left+" s"; if(left===0) timeUp();};
   tick(); timer=setInterval(tick,250);
 }
 render();
